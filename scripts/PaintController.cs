@@ -34,6 +34,7 @@ public partial class PaintController : Node3D
         public HistoryEntry? PendingHistoryEntry;
     }
 
+    private ThemeManager _theme = null!;
     private Camera3D _camera = null!;
     private Node3D _modelRoot = null!;
     private readonly System.Collections.Generic.List<PaintTarget> _paintTargets = new();
@@ -127,6 +128,13 @@ public partial class PaintController : Node3D
 
     public override void _Ready()
     {
+        _theme = GetNode<ThemeManager>("/root/ThemeManager");
+        // Deferred: Changed can fire from inside the theme-toggle button's
+        // own Pressed handler, and freeing that same button synchronously
+        // while its signal is still dispatching crashes the engine —
+        // deferring the rebuild lets the click finish unwinding first.
+        _theme.Changed += () => CallDeferred(MethodName.RebuildToolbarForTheme);
+
         _camera = GetNode<Camera3D>("Camera3D");
         _canvas2DOverlay = GetNode<TextureRect>("UI/Canvas2DOverlay");
         _hintLabel = GetNode<Label>("UI/HintLabel");

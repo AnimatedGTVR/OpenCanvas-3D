@@ -15,6 +15,11 @@ run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.6", "C#")
 config/icon="res://assets/Logo.png"
 
+[autoload]
+
+AppSettings="*res://scripts/Autoload/AppSettings.cs"
+ThemeManager="*res://scripts/Autoload/ThemeManager.cs"
+
 [dotnet]
 
 project/assembly_name="OpenCanvas3D"

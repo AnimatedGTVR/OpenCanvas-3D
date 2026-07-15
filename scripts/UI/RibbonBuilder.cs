@@ -9,37 +9,45 @@ namespace OpenCanvas3D;
 // split — same class, same fields, no behavior change.
 public partial class PaintController
 {
-    // Paint 3D palette: a near-white app chrome (title bar + ribbon are both
-    // the same light gray, distinguished only by a hairline), a light-blue
-    // selection/active tint, and a white side panel — quite different from
-    // this app's earlier dark-ribbon look.
-    private static readonly Color TitleBarBg = new(0.976f, 0.976f, 0.980f);
-    private static readonly Color RibbonBg = new(0.918f, 0.925f, 0.937f);
-    private static readonly Color OptionsRowBg = new(0.965f, 0.968f, 0.973f);
-    private static readonly Color PanelBg = new(1.0f, 1.0f, 1.0f);
-    private static readonly Color AccentBlue = new(0.0f, 0.47f, 0.83f);
-    private static readonly Color AccentBlueTint = new(0.831f, 0.902f, 0.965f);
-    private static readonly Color TileBg = new(0.965f, 0.968f, 0.973f);
-    private static readonly Color TileBgActive = new(0.831f, 0.902f, 0.965f);
-    private static readonly Color TextDark = new(0.157f, 0.165f, 0.184f);
-    private static readonly Color TextMuted = new(0.404f, 0.416f, 0.443f);
-    private static readonly Color TextLight = TextDark;
     private const int SidePanelWidth = 260;
+
+    // Rebuilding the whole toolbar on a theme change (rather than a granular
+    // per-widget restyle pass) is simpler and safe here: every value the
+    // ribbon/side panel reflect (active tool, brush settings, shape types,
+    // 2D/3D view mode) already lives in persistent fields on this class, not
+    // in the widgets themselves, so a full rebuild faithfully restores
+    // current state — it just repaints with the new palette.
+    private void RebuildToolbarForTheme()
+    {
+        BuildToolbar();
+        UpdateSidePanelForTool();
+        UpdateToolLabels();
+        UpdateUndoRedoButtons();
+    }
 
     private void BuildToolbar()
     {
         var ui = GetNode<CanvasLayer>("UI");
 
+        // A rebuild (theme change) must remove whatever BuildToolbar created
+        // last time before creating it again, or every toggle would stack a
+        // duplicate title bar/ribbon/side panel on top — and it must happen
+        // immediately (Free, not QueueFree) since AddChild below runs in
+        // the same call and would otherwise silently get auto-renamed
+        // ("TitleBar2") next to a same-named node still pending removal.
+        foreach (var name in new[] { "TitleBar", "Ribbon", "OptionsRow", "SidePanel" })
+            ui.GetNodeOrNull(name)?.Free();
+
         // --- Title bar: app name, mirroring Paint 3D's "Untitled - Paint 3D".
         var titleBar = new PanelContainer { Name = "TitleBar", CustomMinimumSize = new Vector2(0, 32) };
         titleBar.SetAnchorsPreset(Control.LayoutPreset.TopWide);
         titleBar.OffsetBottom = 32;
-        titleBar.AddThemeStyleboxOverride("panel", SolidStyleBox(TitleBarBg));
+        titleBar.AddThemeStyleboxOverride("panel", SolidStyleBox(_theme.Current.TitleBarBg));
         ui.AddChild(titleBar);
         var titleLabel = new Label
         {
             Text = "Untitled — OpenCanvas 3D",
-            Modulate = TextMuted,
+            Modulate = _theme.Current.TextMuted,
             VerticalAlignment = VerticalAlignment.Center,
         };
         titleLabel.OffsetLeft = 12;
@@ -57,13 +65,20 @@ public partial class PaintController
         _redoButton = MakeActionButton("Redo", Redo);
         _redoButton.Disabled = true;
         titleBarRight.AddChild(_redoButton);
+        titleBarRight.AddChild(MakeActionButton(_theme.IsDark ? "Light" : "Dark", () =>
+        {
+            var settings = GetNode<AppSettings>("/root/AppSettings");
+            settings.DarkTheme = !_theme.IsDark;
+            settings.Save();
+            _theme.SetDark(settings.DarkTheme);
+        }));
 
         // --- Ribbon: icon-style tool tabs with a label underneath each.
         _toolbar = new PanelContainer { Name = "Ribbon", CustomMinimumSize = new Vector2(0, 64) };
         _toolbar.SetAnchorsPreset(Control.LayoutPreset.TopWide);
         _toolbar.OffsetTop = 32;
         _toolbar.OffsetBottom = 96;
-        _toolbar.AddThemeStyleboxOverride("panel", SolidStyleBox(RibbonBg));
+        _toolbar.AddThemeStyleboxOverride("panel", SolidStyleBox(_theme.Current.RibbonBg));
         ui.AddChild(_toolbar);
 
         var ribbonRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Begin };
@@ -108,7 +123,7 @@ public partial class PaintController
         optionsRow.SetAnchorsPreset(Control.LayoutPreset.TopWide);
         optionsRow.OffsetTop = 96;
         optionsRow.OffsetBottom = 136;
-        optionsRow.AddThemeStyleboxOverride("panel", SolidStyleBox(OptionsRowBg));
+        optionsRow.AddThemeStyleboxOverride("panel", SolidStyleBox(_theme.Current.OptionsRowBg));
         ui.AddChild(optionsRow);
 
         var optionsInner = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.End };
@@ -129,7 +144,7 @@ public partial class PaintController
         _sidePanel.OffsetTop = 136;
         _sidePanel.OffsetRight = 0;
         _sidePanel.OffsetBottom = 0;
-        _sidePanel.AddThemeStyleboxOverride("panel", SolidStyleBox(PanelBg));
+        _sidePanel.AddThemeStyleboxOverride("panel", SolidStyleBox(_theme.Current.PanelBg));
         ui.AddChild(_sidePanel);
 
         var panelColumn = new VBoxContainer();
@@ -142,7 +157,7 @@ public partial class PaintController
         _toolLabel = new Label
         {
             Text = "Brush",
-            Modulate = AccentBlue,
+            Modulate = _theme.Current.AccentBlue,
             ThemeTypeVariation = "HeaderMedium",
         };
         panelColumn.AddChild(_toolLabel);
@@ -176,7 +191,7 @@ public partial class PaintController
 
         _thicknessSectionLabel = MakeSectionLabel("Thickness");
         panelColumn.AddChild(_thicknessSectionLabel);
-        _thicknessLabel = new Label { Text = $"{_brushSize}px", Modulate = TextMuted };
+        _thicknessLabel = new Label { Text = $"{_brushSize}px", Modulate = _theme.Current.TextMuted };
         panelColumn.AddChild(_thicknessLabel);
         var thicknessSlider = new HSlider
         {
@@ -194,7 +209,7 @@ public partial class PaintController
         panelColumn.AddChild(thicknessSlider);
 
         panelColumn.AddChild(MakeSectionLabel("Opacity"));
-        _opacityLabel = new Label { Text = "100%", Modulate = TextMuted };
+        _opacityLabel = new Label { Text = "100%", Modulate = _theme.Current.TextMuted };
         panelColumn.AddChild(_opacityLabel);
         var opacitySlider = new HSlider
         {
@@ -235,7 +250,7 @@ public partial class PaintController
         _hintLabel.OffsetBottom = 168;
         _hintLabel.OffsetLeft = 12;
         _hintLabel.OffsetRight = -SidePanelWidth - 16;
-        _hintLabel.Modulate = TextMuted;
+        _hintLabel.Modulate = _theme.Current.TextMuted;
     }
 
     private static StyleBoxFlat SolidStyleBox(Color color)
@@ -248,7 +263,7 @@ public partial class PaintController
         return new Label
         {
             Text = text,
-            Modulate = TextDark,
+            Modulate = _theme.Current.TextDark,
             ThemeTypeVariation = "HeaderSmall",
         };
     }
@@ -265,11 +280,11 @@ public partial class PaintController
             Flat = true,
             Alignment = HorizontalAlignment.Center,
         };
-        button.AddThemeColorOverride("font_color", TextDark);
-        button.AddThemeColorOverride("font_hover_color", TextDark);
-        button.AddThemeColorOverride("font_pressed_color", AccentBlue);
-        button.AddThemeStyleboxOverride("hover", SolidStyleBox(AccentBlueTint));
-        button.AddThemeStyleboxOverride("pressed", SolidStyleBox(AccentBlueTint));
+        button.AddThemeColorOverride("font_color", _theme.Current.TextDark);
+        button.AddThemeColorOverride("font_hover_color", _theme.Current.TextDark);
+        button.AddThemeColorOverride("font_pressed_color", _theme.Current.AccentBlue);
+        button.AddThemeStyleboxOverride("hover", SolidStyleBox(_theme.Current.AccentBlueTint));
+        button.AddThemeStyleboxOverride("pressed", SolidStyleBox(_theme.Current.AccentBlueTint));
         button.AddThemeFontSizeOverride("font_size", 12);
         button.Pressed += action;
         return button;
@@ -282,8 +297,8 @@ public partial class PaintController
             Text = type.ToString(),
             CustomMinimumSize = new Vector2(48, 40),
         };
-        button.AddThemeColorOverride("font_color", TextDark);
-        button.AddThemeStyleboxOverride("normal", SolidStyleBox(TileBg));
+        button.AddThemeColorOverride("font_color", _theme.Current.TextDark);
+        button.AddThemeStyleboxOverride("normal", SolidStyleBox(_theme.Current.TileBg));
         _brushTypeButtons[type] = button;
         button.Pressed += () =>
         {
@@ -300,8 +315,8 @@ public partial class PaintController
             Text = type.ToString(),
             CustomMinimumSize = new Vector2(48, 40),
         };
-        button.AddThemeColorOverride("font_color", TextDark);
-        button.AddThemeStyleboxOverride("normal", SolidStyleBox(TileBg));
+        button.AddThemeColorOverride("font_color", _theme.Current.TextDark);
+        button.AddThemeStyleboxOverride("normal", SolidStyleBox(_theme.Current.TileBg));
         _shape2DButtons[type] = button;
         button.Pressed += () =>
         {
@@ -318,8 +333,8 @@ public partial class PaintController
             Text = type.ToString(),
             CustomMinimumSize = new Vector2(48, 40),
         };
-        button.AddThemeColorOverride("font_color", TextDark);
-        button.AddThemeStyleboxOverride("normal", SolidStyleBox(TileBg));
+        button.AddThemeColorOverride("font_color", _theme.Current.TextDark);
+        button.AddThemeStyleboxOverride("normal", SolidStyleBox(_theme.Current.TileBg));
         _shape3DButtons[type] = button;
         button.Pressed += () =>
         {
@@ -405,8 +420,8 @@ public partial class PaintController
             Text = text,
             CustomMinimumSize = new Vector2(82, 36),
         };
-        button.AddThemeColorOverride("font_color", TextDark);
-        button.AddThemeStyleboxOverride("normal", SolidStyleBox(TileBg));
+        button.AddThemeColorOverride("font_color", _theme.Current.TextDark);
+        button.AddThemeStyleboxOverride("normal", SolidStyleBox(_theme.Current.TileBg));
         button.Pressed += action;
         return button;
     }
@@ -455,11 +470,11 @@ public partial class PaintController
         if (_currentColorSwatch != null)
             _currentColorSwatch.Color = _brushColor;
         foreach (var (type, button) in _brushTypeButtons)
-            button.AddThemeStyleboxOverride("normal", SolidStyleBox(type == _brushType ? TileBgActive : TileBg));
+            button.AddThemeStyleboxOverride("normal", SolidStyleBox(type == _brushType ? _theme.Current.TileBgActive : _theme.Current.TileBg));
         foreach (var (type, button) in _shape2DButtons)
-            button.AddThemeStyleboxOverride("normal", SolidStyleBox(type == _shape2DType ? TileBgActive : TileBg));
+            button.AddThemeStyleboxOverride("normal", SolidStyleBox(type == _shape2DType ? _theme.Current.TileBgActive : _theme.Current.TileBg));
         foreach (var (type, button) in _shape3DButtons)
-            button.AddThemeStyleboxOverride("normal", SolidStyleBox(type == _shape3DType ? TileBgActive : TileBg));
+            button.AddThemeStyleboxOverride("normal", SolidStyleBox(type == _shape3DType ? _theme.Current.TileBgActive : _theme.Current.TileBg));
 
         if (_toolLabel != null)
         {
