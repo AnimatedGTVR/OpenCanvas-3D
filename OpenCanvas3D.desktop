@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=OpenCanvas 3D
+Comment=Paint and texture 3D models on Linux
+Exec=/usr/bin/godot-mono --path /home/animatedpc/Work/OpenCanvas3D
+Path=/home/animatedpc/Work/OpenCanvas3D
+Icon=/home/animatedpc/Work/OpenCanvas3D/assets/Logo.png
+Terminal=false
+Categories=Graphics;2DGraphics;3DGraphics;
+StartupNotify=true
