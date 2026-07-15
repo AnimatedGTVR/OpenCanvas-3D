@@ -59,10 +59,10 @@ public partial class PaintController
         titleBarRight.OffsetLeft = 8;
         titleBarRight.OffsetRight = -8;
         titleBar.AddChild(titleBarRight);
-        _undoButton = MakeActionButton("Undo", Undo);
+        _undoButton = MakeActionButton("Undo", Undo, "undo");
         _undoButton.Disabled = true;
         titleBarRight.AddChild(_undoButton);
-        _redoButton = MakeActionButton("Redo", Redo);
+        _redoButton = MakeActionButton("Redo", Redo, "redo");
         _redoButton.Disabled = true;
         titleBarRight.AddChild(_redoButton);
         titleBarRight.AddChild(MakeActionButton(_theme.IsDark ? "Light" : "Dark", () =>
@@ -71,7 +71,7 @@ public partial class PaintController
             settings.DarkTheme = !_theme.IsDark;
             settings.Save();
             _theme.SetDark(settings.DarkTheme);
-        }));
+        }, _theme.IsDark ? "light_mode" : "dark_mode"));
 
         // --- Ribbon: a persistent tab strip (which group of tools is open)
         // over a content row that swaps per tab — Paint 3D's ribbon, rather
@@ -93,13 +93,13 @@ public partial class PaintController
         tabStripRow.CustomMinimumSize = new Vector2(0, 28);
         ribbonColumn.AddChild(tabStripRow);
 
-        tabStripRow.AddChild(MakeTabStripButton("Brushes", RibbonTab.Brushes));
-        tabStripRow.AddChild(MakeTabStripButton("2D Shapes", RibbonTab.Shapes2D));
-        tabStripRow.AddChild(MakeTabStripButton("3D Shapes", RibbonTab.Shapes3D));
-        tabStripRow.AddChild(MakeTabStripButton("Text", RibbonTab.Text));
-        tabStripRow.AddChild(MakeTabStripButton("Doodle", RibbonTab.Doodle));
-        tabStripRow.AddChild(MakeTabStripButton("Canvas", RibbonTab.Canvas));
-        tabStripRow.AddChild(MakeTabStripButton("File", RibbonTab.File));
+        tabStripRow.AddChild(MakeTabStripButton("Brushes", RibbonTab.Brushes, "tab_brushes"));
+        tabStripRow.AddChild(MakeTabStripButton("2D Shapes", RibbonTab.Shapes2D, "tab_shapes2d"));
+        tabStripRow.AddChild(MakeTabStripButton("3D Shapes", RibbonTab.Shapes3D, "tab_shapes3d"));
+        tabStripRow.AddChild(MakeTabStripButton("Text", RibbonTab.Text, "tab_text"));
+        tabStripRow.AddChild(MakeTabStripButton("Doodle", RibbonTab.Doodle, "tab_doodle"));
+        tabStripRow.AddChild(MakeTabStripButton("Canvas", RibbonTab.Canvas, "tab_canvas"));
+        tabStripRow.AddChild(MakeTabStripButton("File", RibbonTab.File, "tab_file"));
 
         _ribbonContentRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Begin };
         _ribbonContentRow.AddThemeConstantOverride("separation", 2);
@@ -210,7 +210,7 @@ public partial class PaintController
             CustomMinimumSize = new Vector2(40, 40),
         };
         colorRow.AddChild(_currentColorSwatch);
-        colorRow.AddChild(MakeActionButton("Pick", () => SelectTool(Tool.Eyedropper)));
+        colorRow.AddChild(MakeActionButton("Pick", () => SelectTool(Tool.Eyedropper), "eyedropper"));
 
         var palette = new GridContainer { Columns = 4 };
         palette.AddThemeConstantOverride("h_separation", 6);
@@ -241,10 +241,11 @@ public partial class PaintController
         };
     }
 
-    // Paint 3D's ribbon buttons stack a glyph over a small caption label
-    // rather than showing a single inline text string — approximated here
-    // with a two-line, center-aligned button since this app has no icon set.
-    private Button MakeRibbonTab(string text, Action action)
+    // Paint 3D's ribbon buttons stack a glyph over a small caption label —
+    // Button's native IconAlignment/ExpandIcon handle exactly that when an
+    // icon is supplied, with the plain two-line text fallback kept for
+    // spots that don't have (or don't need) art of their own.
+    private Button MakeRibbonTab(string text, Action action, string? iconName = null)
     {
         var button = new Button
         {
@@ -252,7 +253,12 @@ public partial class PaintController
             CustomMinimumSize = new Vector2(64, 56),
             Flat = true,
             Alignment = HorizontalAlignment.Center,
+            IconAlignment = HorizontalAlignment.Center,
+            VerticalIconAlignment = VerticalAlignment.Top,
+            ExpandIcon = false,
         };
+        if (iconName != null)
+            button.Icon = IconSet.Get(iconName, _theme.IsDark);
         button.AddThemeColorOverride("font_color", _theme.Current.TextDark);
         button.AddThemeColorOverride("font_hover_color", _theme.Current.TextDark);
         button.AddThemeColorOverride("font_pressed_color", _theme.Current.AccentBlue);
@@ -267,15 +273,20 @@ public partial class PaintController
     // Shapes, ...); pressing one swaps _ribbonContentRow's children to that
     // group's tools and, where the group maps to exactly one tool (Text,
     // Doodle), activates it directly rather than requiring a second click.
-    private Button MakeTabStripButton(string text, RibbonTab tab)
+    private Button MakeTabStripButton(string text, RibbonTab tab, string? iconName = null)
     {
         var button = new Button
         {
             Text = text,
             CustomMinimumSize = new Vector2(0, 24),
             Flat = true,
+            IconAlignment = HorizontalAlignment.Left,
+            ExpandIcon = false,
         };
+        if (iconName != null)
+            button.Icon = IconSet.Get(iconName, _theme.IsDark);
         button.AddThemeFontSizeOverride("font_size", 12);
+        button.AddThemeConstantOverride("icon_max_width", 16);
         _ribbonTabButtons[tab] = button;
         button.Pressed += () => SelectRibbonTab(tab);
         return button;
@@ -328,10 +339,10 @@ public partial class PaintController
         switch (_activeRibbonTab)
         {
             case RibbonTab.Brushes:
-                _ribbonContentRow.AddChild(MakeRibbonTab("Brush", () => SelectTool(Tool.Brush)));
-                _ribbonContentRow.AddChild(MakeRibbonTab("Eraser", () => SelectTool(Tool.Eraser)));
-                _ribbonContentRow.AddChild(MakeRibbonTab("Fill", () => SelectTool(Tool.Fill)));
-                _ribbonContentRow.AddChild(MakeRibbonTab("Eyedropper", () => SelectTool(Tool.Eyedropper)));
+                _ribbonContentRow.AddChild(MakeRibbonTab("Brush", () => SelectTool(Tool.Brush), "brush"));
+                _ribbonContentRow.AddChild(MakeRibbonTab("Eraser", () => SelectTool(Tool.Eraser), "eraser"));
+                _ribbonContentRow.AddChild(MakeRibbonTab("Fill", () => SelectTool(Tool.Fill), "fill"));
+                _ribbonContentRow.AddChild(MakeRibbonTab("Eyedropper", () => SelectTool(Tool.Eyedropper), "eyedropper"));
                 break;
             case RibbonTab.Shapes2D:
                 _ribbonContentRow.AddChild(new Label
@@ -366,7 +377,7 @@ public partial class PaintController
                 });
                 break;
             case RibbonTab.Canvas:
-                _viewToggleButton = MakeActionButton(_is2DMode ? "2D view" : "3D view", ToggleViewMode);
+                _viewToggleButton = MakeActionButton(_is2DMode ? "2D view" : "3D view", ToggleViewMode, "view_toggle");
                 _ribbonContentRow.AddChild(_viewToggleButton);
                 break;
             case RibbonTab.File:
@@ -387,9 +398,9 @@ public partial class PaintController
                     _doodlePoints.Clear();
                     _doodlePreview = null;
                     _hintLabel.Text = "Canvas cleared";
-                }));
-                _ribbonContentRow.AddChild(MakeRibbonTab("Export", ExportPaintTexture));
-                _ribbonContentRow.AddChild(MakeRibbonTab("Import\nModel", OpenImportDialog));
+                }, "clear"));
+                _ribbonContentRow.AddChild(MakeRibbonTab("Export", ExportPaintTexture, "export"));
+                _ribbonContentRow.AddChild(MakeRibbonTab("Import\nModel", OpenImportDialog, "import"));
                 break;
         }
     }
@@ -418,6 +429,10 @@ public partial class PaintController
         {
             Text = type.ToString(),
             CustomMinimumSize = new Vector2(48, 40),
+            IconAlignment = HorizontalAlignment.Center,
+            VerticalIconAlignment = VerticalAlignment.Top,
+            ExpandIcon = false,
+            Icon = IconSet.Get($"shape2d_{type.ToString().ToLower()}", _theme.IsDark),
         };
         button.AddThemeColorOverride("font_color", _theme.Current.TextDark);
         button.AddThemeStyleboxOverride("normal", SolidStyleBox(_theme.Current.TileBg));
@@ -436,6 +451,10 @@ public partial class PaintController
         {
             Text = type.ToString(),
             CustomMinimumSize = new Vector2(48, 40),
+            IconAlignment = HorizontalAlignment.Center,
+            VerticalIconAlignment = VerticalAlignment.Top,
+            ExpandIcon = false,
+            Icon = IconSet.Get($"shape3d_{type.ToString().ToLower()}", _theme.IsDark),
         };
         button.AddThemeColorOverride("font_color", _theme.Current.TextDark);
         button.AddThemeStyleboxOverride("normal", SolidStyleBox(_theme.Current.TileBg));
@@ -544,15 +563,19 @@ public partial class PaintController
             : "Click and drag on the model to paint";
     }
 
-    private Button MakeActionButton(string text, Action action)
+    private Button MakeActionButton(string text, Action action, string? iconName = null)
     {
         var button = new Button
         {
             Text = text,
             CustomMinimumSize = new Vector2(82, 36),
+            ExpandIcon = false,
         };
+        if (iconName != null)
+            button.Icon = IconSet.Get(iconName, _theme.IsDark);
         button.AddThemeColorOverride("font_color", _theme.Current.TextDark);
         button.AddThemeStyleboxOverride("normal", SolidStyleBox(_theme.Current.TileBg));
+        button.AddThemeConstantOverride("icon_max_width", 18);
         button.Pressed += action;
         return button;
     }
