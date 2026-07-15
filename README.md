@@ -1,34 +1,48 @@
-# OpenCanvas 3D
+<div align="center">
+  <img src="assets/Logo.png" alt="OpenCanvas 3D logo" width="140" />
 
-OpenCanvas 3D is a free and open-source 2D/3D art application for Linux with
-native X11 and Wayland support. Inspired by Microsoft's Paint 3D, it offers a
-simple, beginner-friendly way to create artwork and 3D scenes, built in Godot.
+  # OpenCanvas 3D
 
-At its core it paints directly onto a real 3D model surface: it raycasts
-against the model mesh, interpolates UV coordinates, and draws into a live
-SubViewport texture used as the model's material. Every paintable mesh (the
-model and each placed 3D shape) gets its own independent canvas.
+  **A free, open-source 2D/3D art app for Linux — inspired by Microsoft Paint 3D.**
 
-## Current Features
+  [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+  [![Engine](https://img.shields.io/badge/engine-Godot%204-478cbf.svg)](https://godotengine.org)
+  [![Platform](https://img.shields.io/badge/platform-Linux%20(X11%20%7C%20Wayland)-informational.svg)](#run)
+</div>
 
-- Direct painting on a 3D model (default: a flat plane), with real mesh
-  triangle UV hit detection and live texture updates
-- Import your own model via the "Import Model" button, or drag and drop a
-  `.glb`, `.gltf`, or `.obj` file onto the window
-- Brush, eraser, fill (bucket), eyedropper, text, and 2D/3D shape tools
-- 3D Doodle tool — draw a freehand stroke in the scene and it becomes a real
-  extruded 3D tube mesh
-- 3D shapes (cube, sphere, cone, cylinder, capsule, torus) can be painted on
-  individually, each with its own canvas
-- Undo/redo (Ctrl+Z / Ctrl+Y)
-- 2D/3D canvas view toggle
-- Brush type, thickness, and opacity controls, with a color palette
-- Clear canvas, export painted texture to PNG
-- Right-drag orbit camera, mouse wheel zoom
+---
+
+OpenCanvas 3D offers a simple, beginner-friendly way to create artwork and 3D
+scenes, built in Godot 4 with C#. At its core it paints directly onto a real
+3D model's surface: it raycasts against the mesh, interpolates UV
+coordinates, and draws into a live texture used as the model's material.
+Every paintable mesh — the model and each shape you place — gets its own
+independent canvas, so painting one never bleeds onto another.
+
+## Contents
+
+- [Features](#features)
+- [Run](#run)
+- [Controls](#controls)
+- [License](#license)
+
+## Features
+
+| | |
+|---|---|
+| 🖌️ **Painting** | Brush, eraser, fill (bucket), and eyedropper, with brush type, thickness, opacity, and a color palette |
+| 🔠 **Text & shapes** | Stamp text, draw 2D shapes on the canvas, or drop 3D primitives (cube, sphere, cone, cylinder, capsule, torus) — each shape paintable on its own |
+| 🌀 **3D Doodle** | Freehand strokes in the scene are extruded into real 3D tube meshes, not flat lines |
+| 🖼️ **Model import** | Drag and drop or import your own `.glb`, `.gltf`, or `.obj` model to paint on |
+| ↩️ **Undo/redo** | Full undo/redo history per canvas (`Ctrl+Z` / `Ctrl+Y`) |
+| 🔁 **2D/3D view** | Toggle between the live 3D scene and a flat 2D view of the canvas |
+| 🎥 **Camera** | Right-drag orbit, scroll-wheel zoom |
+| 📤 **Export** | Save the painted texture out to PNG |
 
 ## Run
 
-Open the project in Godot 4.6 with C# support, or build the scripts with:
+Open the project in **Godot 4.6+** with C# support, or build the scripts
+directly:
 
 ```sh
 dotnet build
@@ -42,11 +56,18 @@ res://scenes/Main.tscn
 
 ## Controls
 
-- Left drag on the model: paint (or fill/pick color/place a shape/doodle,
-  depending on the selected tool)
-- Right drag: orbit camera
-- Mouse wheel: zoom
-- Ribbon: brush, eraser, fill, eyedropper, doodle, text, 2D shapes, 3D
-  shapes, clear, export, import model
-- Side panel: brush/shape type, thickness, opacity, color
-- Ctrl+Z / Ctrl+Y: undo / redo
+| Action | Control |
+|---|---|
+| Paint / fill / pick color / place a shape or doodle | Left-click and drag on the model |
+| Orbit camera | Right-click and drag |
+| Zoom | Mouse wheel |
+| Undo / Redo | `Ctrl+Z` / `Ctrl+Y` |
+
+**Ribbon:** brush · eraser · fill · eyedropper · doodle · text · 2D shapes ·
+3D shapes · clear · export · import model
+
+**Side panel:** brush/shape type · thickness · opacity · color
+
+## License
+
+OpenCanvas 3D is licensed under the [GNU GPL v3](LICENSE).
