@@ -73,75 +73,48 @@ public partial class PaintController
             _theme.SetDark(settings.DarkTheme);
         }));
 
-        // --- Ribbon: icon-style tool tabs with a label underneath each.
-        _toolbar = new PanelContainer { Name = "Ribbon", CustomMinimumSize = new Vector2(0, 64) };
+        // --- Ribbon: a persistent tab strip (which group of tools is open)
+        // over a content row that swaps per tab — Paint 3D's ribbon, rather
+        // than one long flat row of every tool at once.
+        _toolbar = new PanelContainer { Name = "Ribbon", CustomMinimumSize = new Vector2(0, 96) };
         _toolbar.SetAnchorsPreset(Control.LayoutPreset.TopWide);
         _toolbar.OffsetTop = 32;
-        _toolbar.OffsetBottom = 96;
+        _toolbar.OffsetBottom = 128;
         _toolbar.AddThemeStyleboxOverride("panel", SolidStyleBox(_theme.Current.RibbonBg));
         ui.AddChild(_toolbar);
 
-        var ribbonRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Begin };
-        ribbonRow.AddThemeConstantOverride("separation", 2);
-        ribbonRow.OffsetLeft = 8;
-        ribbonRow.OffsetTop = 4;
-        _toolbar.AddChild(ribbonRow);
+        var ribbonColumn = new VBoxContainer();
+        _toolbar.AddChild(ribbonColumn);
 
-        ribbonRow.AddChild(MakeRibbonTab("Brush", () => SelectTool(Tool.Brush)));
-        ribbonRow.AddChild(MakeRibbonTab("Eraser", () => SelectTool(Tool.Eraser)));
-        ribbonRow.AddChild(MakeRibbonTab("Fill", () => SelectTool(Tool.Fill)));
-        ribbonRow.AddChild(MakeRibbonTab("Eyedropper", () => SelectTool(Tool.Eyedropper)));
-        ribbonRow.AddChild(MakeRibbonTab("Doodle", () => SelectTool(Tool.Doodle)));
-        ribbonRow.AddChild(MakeRibbonTab("Text", () => SelectTool(Tool.Text)));
-        ribbonRow.AddChild(MakeRibbonTab("2D shapes", () => SelectTool(Tool.Shape2D)));
-        ribbonRow.AddChild(MakeRibbonTab("3D shapes", () => SelectTool(Tool.Shape3D)));
-        ribbonRow.AddChild(new VSeparator { CustomMinimumSize = new Vector2(1, 48) });
-        ribbonRow.AddChild(MakeRibbonTab("Clear", () =>
-        {
-            if (_activeTarget is { } target)
-            {
-                BeginHistoryEntry();
-                PaintBaseCoat(target);
-                foreach (Node child in _doodleRoot!.GetChildren().Concat(_shape3DRoot!.GetChildren()))
-                {
-                    if (child is Node3D node3D && node3D.Visible)
-                        TrackHiddenNode(node3D);
-                }
-                CommitHistoryEntry();
-            }
-            _lastUv = null;
-            _doodlePoints.Clear();
-            _doodlePreview = null;
-            _hintLabel.Text = "Canvas cleared";
-        }));
-        ribbonRow.AddChild(MakeRibbonTab("Export", ExportPaintTexture));
-        ribbonRow.AddChild(new VSeparator { CustomMinimumSize = new Vector2(1, 48) });
-        ribbonRow.AddChild(MakeRibbonTab("Import\nModel", OpenImportDialog));
+        var tabStripRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Begin };
+        tabStripRow.AddThemeConstantOverride("separation", 2);
+        tabStripRow.OffsetLeft = 8;
+        tabStripRow.OffsetTop = 2;
+        tabStripRow.CustomMinimumSize = new Vector2(0, 28);
+        ribbonColumn.AddChild(tabStripRow);
 
-        // --- Options row: view mode toggle, mirroring Paint 3D's "3D view" control.
-        var optionsRow = new PanelContainer { Name = "OptionsRow", CustomMinimumSize = new Vector2(0, 40) };
-        optionsRow.SetAnchorsPreset(Control.LayoutPreset.TopWide);
-        optionsRow.OffsetTop = 96;
-        optionsRow.OffsetBottom = 136;
-        optionsRow.AddThemeStyleboxOverride("panel", SolidStyleBox(_theme.Current.OptionsRowBg));
-        ui.AddChild(optionsRow);
+        tabStripRow.AddChild(MakeTabStripButton("Brushes", RibbonTab.Brushes));
+        tabStripRow.AddChild(MakeTabStripButton("2D Shapes", RibbonTab.Shapes2D));
+        tabStripRow.AddChild(MakeTabStripButton("3D Shapes", RibbonTab.Shapes3D));
+        tabStripRow.AddChild(MakeTabStripButton("Text", RibbonTab.Text));
+        tabStripRow.AddChild(MakeTabStripButton("Doodle", RibbonTab.Doodle));
+        tabStripRow.AddChild(MakeTabStripButton("Canvas", RibbonTab.Canvas));
+        tabStripRow.AddChild(MakeTabStripButton("File", RibbonTab.File));
 
-        var optionsInner = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.End };
-        optionsInner.AddThemeConstantOverride("separation", 8);
-        optionsInner.OffsetLeft = 8;
-        optionsInner.OffsetTop = 4;
-        optionsInner.OffsetRight = -8;
-        optionsInner.SetAnchorsPreset(Control.LayoutPreset.TopWide);
-        optionsRow.AddChild(optionsInner);
+        _ribbonContentRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Begin };
+        _ribbonContentRow.AddThemeConstantOverride("separation", 2);
+        _ribbonContentRow.OffsetLeft = 8;
+        _ribbonContentRow.CustomMinimumSize = new Vector2(0, 60);
+        ribbonColumn.AddChild(_ribbonContentRow);
 
-        _viewToggleButton = MakeActionButton("3D view", ToggleViewMode);
-        optionsInner.AddChild(_viewToggleButton);
+        BuildRibbonTabContent();
+        UpdateTabStripHighlight();
 
         // --- Right side panel: brush grid, thickness/opacity, color + swatches.
         _sidePanel = new PanelContainer { Name = "SidePanel", CustomMinimumSize = new Vector2(SidePanelWidth, 0) };
         _sidePanel.SetAnchorsPreset(Control.LayoutPreset.RightWide);
         _sidePanel.OffsetLeft = -SidePanelWidth;
-        _sidePanel.OffsetTop = 136;
+        _sidePanel.OffsetTop = 128;
         _sidePanel.OffsetRight = 0;
         _sidePanel.OffsetBottom = 0;
         _sidePanel.AddThemeStyleboxOverride("panel", SolidStyleBox(_theme.Current.PanelBg));
@@ -246,8 +219,8 @@ public partial class PaintController
         foreach (var color in PaletteColors)
             palette.AddChild(MakeColorButton(color));
 
-        _hintLabel.OffsetTop = 144;
-        _hintLabel.OffsetBottom = 168;
+        _hintLabel.OffsetTop = 136;
+        _hintLabel.OffsetBottom = 160;
         _hintLabel.OffsetLeft = 12;
         _hintLabel.OffsetRight = -SidePanelWidth - 16;
         _hintLabel.Modulate = _theme.Current.TextMuted;
@@ -288,6 +261,137 @@ public partial class PaintController
         button.AddThemeFontSizeOverride("font_size", 12);
         button.Pressed += action;
         return button;
+    }
+
+    // The tab strip is a persistent row of group selectors (Brushes, 2D
+    // Shapes, ...); pressing one swaps _ribbonContentRow's children to that
+    // group's tools and, where the group maps to exactly one tool (Text,
+    // Doodle), activates it directly rather than requiring a second click.
+    private Button MakeTabStripButton(string text, RibbonTab tab)
+    {
+        var button = new Button
+        {
+            Text = text,
+            CustomMinimumSize = new Vector2(0, 24),
+            Flat = true,
+        };
+        button.AddThemeFontSizeOverride("font_size", 12);
+        _ribbonTabButtons[tab] = button;
+        button.Pressed += () => SelectRibbonTab(tab);
+        return button;
+    }
+
+    private void SelectRibbonTab(RibbonTab tab)
+    {
+        _activeRibbonTab = tab;
+        switch (tab)
+        {
+            case RibbonTab.Text:
+                SelectTool(Tool.Text);
+                break;
+            case RibbonTab.Doodle:
+                SelectTool(Tool.Doodle);
+                break;
+            case RibbonTab.Shapes2D:
+                SelectTool(Tool.Shape2D);
+                break;
+            case RibbonTab.Shapes3D:
+                SelectTool(Tool.Shape3D);
+                break;
+            case RibbonTab.Brushes:
+                if (_activeTool is not (Tool.Brush or Tool.Eraser or Tool.Fill or Tool.Eyedropper))
+                    SelectTool(Tool.Brush);
+                break;
+        }
+        BuildRibbonTabContent();
+        UpdateTabStripHighlight();
+    }
+
+    private void UpdateTabStripHighlight()
+    {
+        foreach (var (tab, button) in _ribbonTabButtons)
+        {
+            bool active = tab == _activeRibbonTab;
+            button.AddThemeStyleboxOverride("normal", SolidStyleBox(active ? _theme.Current.AccentBlueTint : _theme.Current.RibbonBg));
+            button.AddThemeColorOverride("font_color", active ? _theme.Current.AccentBlue : _theme.Current.TextDark);
+        }
+    }
+
+    // Rebuilds only the content row for the active tab, leaving the tab
+    // strip itself and the side panel alone — much cheaper than a full
+    // BuildToolbar() rebuild for the common case of switching tabs.
+    private void BuildRibbonTabContent()
+    {
+        foreach (Node child in _ribbonContentRow.GetChildren())
+            child.Free();
+
+        switch (_activeRibbonTab)
+        {
+            case RibbonTab.Brushes:
+                _ribbonContentRow.AddChild(MakeRibbonTab("Brush", () => SelectTool(Tool.Brush)));
+                _ribbonContentRow.AddChild(MakeRibbonTab("Eraser", () => SelectTool(Tool.Eraser)));
+                _ribbonContentRow.AddChild(MakeRibbonTab("Fill", () => SelectTool(Tool.Fill)));
+                _ribbonContentRow.AddChild(MakeRibbonTab("Eyedropper", () => SelectTool(Tool.Eyedropper)));
+                break;
+            case RibbonTab.Shapes2D:
+                _ribbonContentRow.AddChild(new Label
+                {
+                    Text = "Pick a shape and drag on the canvas to draw it.",
+                    Modulate = _theme.Current.TextMuted,
+                    VerticalAlignment = VerticalAlignment.Center,
+                });
+                break;
+            case RibbonTab.Shapes3D:
+                _ribbonContentRow.AddChild(new Label
+                {
+                    Text = "Pick a shape and click in the scene to place it.",
+                    Modulate = _theme.Current.TextMuted,
+                    VerticalAlignment = VerticalAlignment.Center,
+                });
+                break;
+            case RibbonTab.Text:
+                _ribbonContentRow.AddChild(new Label
+                {
+                    Text = "Click on the canvas to type text.",
+                    Modulate = _theme.Current.TextMuted,
+                    VerticalAlignment = VerticalAlignment.Center,
+                });
+                break;
+            case RibbonTab.Doodle:
+                _ribbonContentRow.AddChild(new Label
+                {
+                    Text = "Drag in the 3D scene to draw a freehand tube mesh.",
+                    Modulate = _theme.Current.TextMuted,
+                    VerticalAlignment = VerticalAlignment.Center,
+                });
+                break;
+            case RibbonTab.Canvas:
+                _viewToggleButton = MakeActionButton(_is2DMode ? "2D view" : "3D view", ToggleViewMode);
+                _ribbonContentRow.AddChild(_viewToggleButton);
+                break;
+            case RibbonTab.File:
+                _ribbonContentRow.AddChild(MakeRibbonTab("Clear", () =>
+                {
+                    if (_activeTarget is { } target)
+                    {
+                        BeginHistoryEntry();
+                        PaintBaseCoat(target);
+                        foreach (Node child in _doodleRoot!.GetChildren().Concat(_shape3DRoot!.GetChildren()))
+                        {
+                            if (child is Node3D node3D && node3D.Visible)
+                                TrackHiddenNode(node3D);
+                        }
+                        CommitHistoryEntry();
+                    }
+                    _lastUv = null;
+                    _doodlePoints.Clear();
+                    _doodlePreview = null;
+                    _hintLabel.Text = "Canvas cleared";
+                }));
+                _ribbonContentRow.AddChild(MakeRibbonTab("Export", ExportPaintTexture));
+                _ribbonContentRow.AddChild(MakeRibbonTab("Import\nModel", OpenImportDialog));
+                break;
+        }
     }
 
     private Button MakeBrushTile(BrushType type)
@@ -391,6 +495,28 @@ public partial class PaintController
         if ((tool == Tool.Doodle || tool == Tool.Shape3D) && _is2DMode)
             SetViewMode(is2D: false);
 
+        // Keep the ribbon tab in sync even when the tool changes through a
+        // path that didn't go via SelectRibbonTab (e.g. the eyedropper or a
+        // color-swatch click switching back to Brush) — the tab bar should
+        // always reflect whichever tool is actually active.
+        var tabForTool = tool switch
+        {
+            Tool.Text => RibbonTab.Text,
+            Tool.Doodle => RibbonTab.Doodle,
+            Tool.Shape2D => RibbonTab.Shapes2D,
+            Tool.Shape3D => RibbonTab.Shapes3D,
+            Tool.Brush or Tool.Eraser or Tool.Fill or Tool.Eyedropper => RibbonTab.Brushes,
+            _ => _activeRibbonTab,
+        };
+        if (tabForTool != _activeRibbonTab)
+        {
+            _activeRibbonTab = tabForTool;
+            if (_ribbonContentRow != null)
+                BuildRibbonTabContent();
+        }
+        if (_ribbonTabButtons.Count > 0)
+            UpdateTabStripHighlight();
+
         UpdateToolLabels();
     }
 
@@ -407,7 +533,12 @@ public partial class PaintController
         _is2DMode = is2D;
         _canvas2DOverlay.Visible = _is2DMode;
         _lastUv = null;
-        _viewToggleButton.Text = _is2DMode ? "2D view" : "3D view";
+        // The view-toggle button only exists while the Canvas tab is the
+        // one currently shown in the ribbon's content row — it's rebuilt
+        // (and the old instance freed) every time another tab is selected,
+        // so the cached reference can be stale here.
+        if (_activeRibbonTab == RibbonTab.Canvas && IsInstanceValid(_viewToggleButton))
+            _viewToggleButton.Text = _is2DMode ? "2D view" : "3D view";
         _hintLabel.Text = _is2DMode
             ? "2D canvas — draw directly on the flat texture"
             : "Click and drag on the model to paint";

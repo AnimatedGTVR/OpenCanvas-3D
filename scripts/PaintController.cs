@@ -47,6 +47,8 @@ public partial class PaintController : Node3D
     private Label _brushLabel = null!;
     private Control _toolbar = null!;
     private Control _sidePanel = null!;
+    private HBoxContainer _ribbonContentRow = null!;
+    private readonly System.Collections.Generic.Dictionary<RibbonTab, Button> _ribbonTabButtons = new();
     private Button _viewToggleButton = null!;
     private Label _thicknessLabel = null!;
     private Label _opacityLabel = null!;
@@ -70,6 +72,8 @@ public partial class PaintController : Node3D
     private BrushType _brushType = BrushType.Marker;
     private enum Tool { Brush, Eraser, Fill, Eyedropper, Doodle, Text, Shape2D, Shape3D }
     private Tool _activeTool = Tool.Brush;
+    private enum RibbonTab { Brushes, Shapes2D, Shapes3D, Text, Doodle, Canvas, File }
+    private RibbonTab _activeRibbonTab = RibbonTab.Brushes;
     private bool _eraserEnabled => _activeTool == Tool.Eraser;
     private bool _eyedropperActive => _activeTool == Tool.Eyedropper;
     private bool _fillEnabled => _activeTool == Tool.Fill;
