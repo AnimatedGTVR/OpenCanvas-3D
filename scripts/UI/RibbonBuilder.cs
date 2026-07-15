@@ -1,0 +1,479 @@
+using Godot;
+using System;
+using System.Linq;
+
+namespace OpenCanvas3D;
+
+// Extracted from PaintController.cs: everything that builds and updates the
+// runtime UI (ribbon, side panel, widget factories). Purely a code-organization
+// split — same class, same fields, no behavior change.
+public partial class PaintController
+{
+    // Paint 3D palette: a near-white app chrome (title bar + ribbon are both
+    // the same light gray, distinguished only by a hairline), a light-blue
+    // selection/active tint, and a white side panel — quite different from
+    // this app's earlier dark-ribbon look.
+    private static readonly Color TitleBarBg = new(0.976f, 0.976f, 0.980f);
+    private static readonly Color RibbonBg = new(0.918f, 0.925f, 0.937f);
+    private static readonly Color OptionsRowBg = new(0.965f, 0.968f, 0.973f);
+    private static readonly Color PanelBg = new(1.0f, 1.0f, 1.0f);
+    private static readonly Color AccentBlue = new(0.0f, 0.47f, 0.83f);
+    private static readonly Color AccentBlueTint = new(0.831f, 0.902f, 0.965f);
+    private static readonly Color TileBg = new(0.965f, 0.968f, 0.973f);
+    private static readonly Color TileBgActive = new(0.831f, 0.902f, 0.965f);
+    private static readonly Color TextDark = new(0.157f, 0.165f, 0.184f);
+    private static readonly Color TextMuted = new(0.404f, 0.416f, 0.443f);
+    private static readonly Color TextLight = TextDark;
+    private const int SidePanelWidth = 260;
+
+    private void BuildToolbar()
+    {
+        var ui = GetNode<CanvasLayer>("UI");
+
+        // --- Title bar: app name, mirroring Paint 3D's "Untitled - Paint 3D".
+        var titleBar = new PanelContainer { Name = "TitleBar", CustomMinimumSize = new Vector2(0, 32) };
+        titleBar.SetAnchorsPreset(Control.LayoutPreset.TopWide);
+        titleBar.OffsetBottom = 32;
+        titleBar.AddThemeStyleboxOverride("panel", SolidStyleBox(TitleBarBg));
+        ui.AddChild(titleBar);
+        var titleLabel = new Label
+        {
+            Text = "Untitled — OpenCanvas 3D",
+            Modulate = TextMuted,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        titleLabel.OffsetLeft = 12;
+        titleBar.AddChild(titleLabel);
+
+        var titleBarRight = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.End };
+        titleBarRight.AddThemeConstantOverride("separation", 4);
+        titleBarRight.SetAnchorsPreset(Control.LayoutPreset.TopWide);
+        titleBarRight.OffsetLeft = 8;
+        titleBarRight.OffsetRight = -8;
+        titleBar.AddChild(titleBarRight);
+        _undoButton = MakeActionButton("Undo", Undo);
+        _undoButton.Disabled = true;
+        titleBarRight.AddChild(_undoButton);
+        _redoButton = MakeActionButton("Redo", Redo);
+        _redoButton.Disabled = true;
+        titleBarRight.AddChild(_redoButton);
+
+        // --- Ribbon: icon-style tool tabs with a label underneath each.
+        _toolbar = new PanelContainer { Name = "Ribbon", CustomMinimumSize = new Vector2(0, 64) };
+        _toolbar.SetAnchorsPreset(Control.LayoutPreset.TopWide);
+        _toolbar.OffsetTop = 32;
+        _toolbar.OffsetBottom = 96;
+        _toolbar.AddThemeStyleboxOverride("panel", SolidStyleBox(RibbonBg));
+        ui.AddChild(_toolbar);
+
+        var ribbonRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Begin };
+        ribbonRow.AddThemeConstantOverride("separation", 2);
+        ribbonRow.OffsetLeft = 8;
+        ribbonRow.OffsetTop = 4;
+        _toolbar.AddChild(ribbonRow);
+
+        ribbonRow.AddChild(MakeRibbonTab("Brush", () => SelectTool(Tool.Brush)));
+        ribbonRow.AddChild(MakeRibbonTab("Eraser", () => SelectTool(Tool.Eraser)));
+        ribbonRow.AddChild(MakeRibbonTab("Fill", () => SelectTool(Tool.Fill)));
+        ribbonRow.AddChild(MakeRibbonTab("Eyedropper", () => SelectTool(Tool.Eyedropper)));
+        ribbonRow.AddChild(MakeRibbonTab("Doodle", () => SelectTool(Tool.Doodle)));
+        ribbonRow.AddChild(MakeRibbonTab("Text", () => SelectTool(Tool.Text)));
+        ribbonRow.AddChild(MakeRibbonTab("2D shapes", () => SelectTool(Tool.Shape2D)));
+        ribbonRow.AddChild(MakeRibbonTab("3D shapes", () => SelectTool(Tool.Shape3D)));
+        ribbonRow.AddChild(new VSeparator { CustomMinimumSize = new Vector2(1, 48) });
+        ribbonRow.AddChild(MakeRibbonTab("Clear", () =>
+        {
+            if (_activeTarget is { } target)
+            {
+                BeginHistoryEntry();
+                PaintBaseCoat(target);
+                foreach (Node child in _doodleRoot!.GetChildren().Concat(_shape3DRoot!.GetChildren()))
+                {
+                    if (child is Node3D node3D && node3D.Visible)
+                        TrackHiddenNode(node3D);
+                }
+                CommitHistoryEntry();
+            }
+            _lastUv = null;
+            _doodlePoints.Clear();
+            _doodlePreview = null;
+            _hintLabel.Text = "Canvas cleared";
+        }));
+        ribbonRow.AddChild(MakeRibbonTab("Export", ExportPaintTexture));
+        ribbonRow.AddChild(new VSeparator { CustomMinimumSize = new Vector2(1, 48) });
+        ribbonRow.AddChild(MakeRibbonTab("Import\nModel", OpenImportDialog));
+
+        // --- Options row: view mode toggle, mirroring Paint 3D's "3D view" control.
+        var optionsRow = new PanelContainer { Name = "OptionsRow", CustomMinimumSize = new Vector2(0, 40) };
+        optionsRow.SetAnchorsPreset(Control.LayoutPreset.TopWide);
+        optionsRow.OffsetTop = 96;
+        optionsRow.OffsetBottom = 136;
+        optionsRow.AddThemeStyleboxOverride("panel", SolidStyleBox(OptionsRowBg));
+        ui.AddChild(optionsRow);
+
+        var optionsInner = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.End };
+        optionsInner.AddThemeConstantOverride("separation", 8);
+        optionsInner.OffsetLeft = 8;
+        optionsInner.OffsetTop = 4;
+        optionsInner.OffsetRight = -8;
+        optionsInner.SetAnchorsPreset(Control.LayoutPreset.TopWide);
+        optionsRow.AddChild(optionsInner);
+
+        _viewToggleButton = MakeActionButton("3D view", ToggleViewMode);
+        optionsInner.AddChild(_viewToggleButton);
+
+        // --- Right side panel: brush grid, thickness/opacity, color + swatches.
+        _sidePanel = new PanelContainer { Name = "SidePanel", CustomMinimumSize = new Vector2(SidePanelWidth, 0) };
+        _sidePanel.SetAnchorsPreset(Control.LayoutPreset.RightWide);
+        _sidePanel.OffsetLeft = -SidePanelWidth;
+        _sidePanel.OffsetTop = 136;
+        _sidePanel.OffsetRight = 0;
+        _sidePanel.OffsetBottom = 0;
+        _sidePanel.AddThemeStyleboxOverride("panel", SolidStyleBox(PanelBg));
+        ui.AddChild(_sidePanel);
+
+        var panelColumn = new VBoxContainer();
+        panelColumn.AddThemeConstantOverride("separation", 10);
+        panelColumn.OffsetLeft = 16;
+        panelColumn.OffsetTop = 14;
+        panelColumn.OffsetRight = -16;
+        _sidePanel.AddChild(panelColumn);
+
+        _toolLabel = new Label
+        {
+            Text = "Brush",
+            Modulate = AccentBlue,
+            ThemeTypeVariation = "HeaderMedium",
+        };
+        panelColumn.AddChild(_toolLabel);
+
+        _brushSectionLabel = MakeSectionLabel("Brushes");
+        panelColumn.AddChild(_brushSectionLabel);
+        _brushGrid = new GridContainer { Columns = 4 };
+        _brushGrid.AddThemeConstantOverride("h_separation", 8);
+        _brushGrid.AddThemeConstantOverride("v_separation", 8);
+        panelColumn.AddChild(_brushGrid);
+        foreach (BrushType type in Enum.GetValues(typeof(BrushType)))
+            _brushGrid.AddChild(MakeBrushTile(type));
+
+        _shape2DSectionLabel = MakeSectionLabel("Shapes");
+        panelColumn.AddChild(_shape2DSectionLabel);
+        _shape2DGrid = new GridContainer { Columns = 4 };
+        _shape2DGrid.AddThemeConstantOverride("h_separation", 8);
+        _shape2DGrid.AddThemeConstantOverride("v_separation", 8);
+        panelColumn.AddChild(_shape2DGrid);
+        foreach (Shape2DType type in Enum.GetValues(typeof(Shape2DType)))
+            _shape2DGrid.AddChild(MakeShape2DTile(type));
+
+        _shape3DSectionLabel = MakeSectionLabel("3D Shapes");
+        panelColumn.AddChild(_shape3DSectionLabel);
+        _shape3DGrid = new GridContainer { Columns = 4 };
+        _shape3DGrid.AddThemeConstantOverride("h_separation", 8);
+        _shape3DGrid.AddThemeConstantOverride("v_separation", 8);
+        panelColumn.AddChild(_shape3DGrid);
+        foreach (Shape3DType type in Enum.GetValues(typeof(Shape3DType)))
+            _shape3DGrid.AddChild(MakeShape3DTile(type));
+
+        _thicknessSectionLabel = MakeSectionLabel("Thickness");
+        panelColumn.AddChild(_thicknessSectionLabel);
+        _thicknessLabel = new Label { Text = $"{_brushSize}px", Modulate = TextMuted };
+        panelColumn.AddChild(_thicknessLabel);
+        var thicknessSlider = new HSlider
+        {
+            MinValue = 2,
+            MaxValue = 64,
+            Step = 1,
+            Value = _brushSize,
+            CustomMinimumSize = new Vector2(0, 24),
+        };
+        thicknessSlider.ValueChanged += value =>
+        {
+            _brushSize = Mathf.RoundToInt((float)value);
+            UpdateToolLabels();
+        };
+        panelColumn.AddChild(thicknessSlider);
+
+        panelColumn.AddChild(MakeSectionLabel("Opacity"));
+        _opacityLabel = new Label { Text = "100%", Modulate = TextMuted };
+        panelColumn.AddChild(_opacityLabel);
+        var opacitySlider = new HSlider
+        {
+            MinValue = 5,
+            MaxValue = 100,
+            Step = 1,
+            Value = _brushOpacity * 100f,
+            CustomMinimumSize = new Vector2(0, 24),
+        };
+        opacitySlider.ValueChanged += value =>
+        {
+            _brushOpacity = (float)value / 100f;
+            UpdateToolLabels();
+        };
+        panelColumn.AddChild(opacitySlider);
+
+        panelColumn.AddChild(new HSeparator());
+
+        var colorRow = new HBoxContainer();
+        colorRow.AddThemeConstantOverride("separation", 8);
+        panelColumn.AddChild(colorRow);
+        _currentColorSwatch = new ColorRect
+        {
+            Color = _brushColor,
+            CustomMinimumSize = new Vector2(40, 40),
+        };
+        colorRow.AddChild(_currentColorSwatch);
+        colorRow.AddChild(MakeActionButton("Pick", () => SelectTool(Tool.Eyedropper)));
+
+        var palette = new GridContainer { Columns = 4 };
+        palette.AddThemeConstantOverride("h_separation", 6);
+        palette.AddThemeConstantOverride("v_separation", 6);
+        panelColumn.AddChild(palette);
+        foreach (var color in PaletteColors)
+            palette.AddChild(MakeColorButton(color));
+
+        _hintLabel.OffsetTop = 144;
+        _hintLabel.OffsetBottom = 168;
+        _hintLabel.OffsetLeft = 12;
+        _hintLabel.OffsetRight = -SidePanelWidth - 16;
+        _hintLabel.Modulate = TextMuted;
+    }
+
+    private static StyleBoxFlat SolidStyleBox(Color color)
+    {
+        return new StyleBoxFlat { BgColor = color };
+    }
+
+    private Label MakeSectionLabel(string text)
+    {
+        return new Label
+        {
+            Text = text,
+            Modulate = TextDark,
+            ThemeTypeVariation = "HeaderSmall",
+        };
+    }
+
+    // Paint 3D's ribbon buttons stack a glyph over a small caption label
+    // rather than showing a single inline text string — approximated here
+    // with a two-line, center-aligned button since this app has no icon set.
+    private Button MakeRibbonTab(string text, Action action)
+    {
+        var button = new Button
+        {
+            Text = text,
+            CustomMinimumSize = new Vector2(64, 56),
+            Flat = true,
+            Alignment = HorizontalAlignment.Center,
+        };
+        button.AddThemeColorOverride("font_color", TextDark);
+        button.AddThemeColorOverride("font_hover_color", TextDark);
+        button.AddThemeColorOverride("font_pressed_color", AccentBlue);
+        button.AddThemeStyleboxOverride("hover", SolidStyleBox(AccentBlueTint));
+        button.AddThemeStyleboxOverride("pressed", SolidStyleBox(AccentBlueTint));
+        button.AddThemeFontSizeOverride("font_size", 12);
+        button.Pressed += action;
+        return button;
+    }
+
+    private Button MakeBrushTile(BrushType type)
+    {
+        var button = new Button
+        {
+            Text = type.ToString(),
+            CustomMinimumSize = new Vector2(48, 40),
+        };
+        button.AddThemeColorOverride("font_color", TextDark);
+        button.AddThemeStyleboxOverride("normal", SolidStyleBox(TileBg));
+        _brushTypeButtons[type] = button;
+        button.Pressed += () =>
+        {
+            _brushType = type;
+            SelectTool(Tool.Brush);
+        };
+        return button;
+    }
+
+    private Button MakeShape2DTile(Shape2DType type)
+    {
+        var button = new Button
+        {
+            Text = type.ToString(),
+            CustomMinimumSize = new Vector2(48, 40),
+        };
+        button.AddThemeColorOverride("font_color", TextDark);
+        button.AddThemeStyleboxOverride("normal", SolidStyleBox(TileBg));
+        _shape2DButtons[type] = button;
+        button.Pressed += () =>
+        {
+            _shape2DType = type;
+            SelectTool(Tool.Shape2D);
+        };
+        return button;
+    }
+
+    private Button MakeShape3DTile(Shape3DType type)
+    {
+        var button = new Button
+        {
+            Text = type.ToString(),
+            CustomMinimumSize = new Vector2(48, 40),
+        };
+        button.AddThemeColorOverride("font_color", TextDark);
+        button.AddThemeStyleboxOverride("normal", SolidStyleBox(TileBg));
+        _shape3DButtons[type] = button;
+        button.Pressed += () =>
+        {
+            _shape3DType = type;
+            SelectTool(Tool.Shape3D);
+        };
+        return button;
+    }
+
+    // Each tool controls a different subset of the shared panel — brush type
+    // only means something for Brush, the shape grids only for their shape
+    // tools — so the relevant section is shown and the rest hidden rather
+    // than exposing controls that don't do anything for the current tool.
+    private void UpdateSidePanelForTool()
+    {
+        bool isBrushLike = _activeTool is Tool.Brush or Tool.Eraser;
+        _brushSectionLabel.Visible = isBrushLike;
+        _brushGrid.Visible = isBrushLike;
+        _shape2DSectionLabel.Visible = _shape2DEnabled;
+        _shape2DGrid.Visible = _shape2DEnabled;
+        _shape3DSectionLabel.Visible = _shape3DEnabled;
+        _shape3DGrid.Visible = _shape3DEnabled;
+        _thicknessSectionLabel.Text = _doodleEnabled ? "Tube Radius" : _shape3DEnabled ? "Size" : "Thickness";
+    }
+
+    private void SelectTool(Tool tool)
+    {
+        // Switching tools mid-action (mid-stroke, mid-shape-drag) shouldn't
+        // silently discard whatever was already drawn — commit any pending
+        // history first so it stays on the undo stack, then reset per-tool
+        // in-progress state for whichever tool is being left.
+        CommitHistoryEntry();
+
+        _activeTool = tool;
+        _lastUv = null;
+        if (tool != Tool.Doodle && _doodlePoints.Count <= 1)
+            _doodlePreview?.QueueFree();
+        _doodlePreview = null;
+        _doodlePoints.Clear();
+        if (tool != Tool.Shape2D)
+        {
+            _shape2DPreviewNode?.QueueFree();
+            _shape2DPreviewNode = null;
+            _shape2DStart = null;
+            _shape2DEnd = null;
+        }
+        _textInput?.QueueFree();
+        _textInput = null;
+        UpdateSidePanelForTool();
+
+        // Doodle and 3D shapes draw in 3D scene space, not on the flat canvas
+        // texture, so neither makes sense in 2D view — switch back to 3D
+        // automatically rather than silently doing nothing.
+        if ((tool == Tool.Doodle || tool == Tool.Shape3D) && _is2DMode)
+            SetViewMode(is2D: false);
+
+        UpdateToolLabels();
+    }
+
+    private void ToggleViewMode()
+    {
+        bool goingTo2D = !_is2DMode;
+        if (goingTo2D && (_doodleEnabled || _shape3DEnabled))
+            SelectTool(Tool.Brush);
+        SetViewMode(goingTo2D);
+    }
+
+    private void SetViewMode(bool is2D)
+    {
+        _is2DMode = is2D;
+        _canvas2DOverlay.Visible = _is2DMode;
+        _lastUv = null;
+        _viewToggleButton.Text = _is2DMode ? "2D view" : "3D view";
+        _hintLabel.Text = _is2DMode
+            ? "2D canvas — draw directly on the flat texture"
+            : "Click and drag on the model to paint";
+    }
+
+    private Button MakeActionButton(string text, Action action)
+    {
+        var button = new Button
+        {
+            Text = text,
+            CustomMinimumSize = new Vector2(82, 36),
+        };
+        button.AddThemeColorOverride("font_color", TextDark);
+        button.AddThemeStyleboxOverride("normal", SolidStyleBox(TileBg));
+        button.Pressed += action;
+        return button;
+    }
+
+    private Button MakeColorButton(Color color)
+    {
+        var button = new Button
+        {
+            Text = "",
+            CustomMinimumSize = new Vector2(32, 32),
+            TooltipText = $"Color {color.ToHtml(false)}",
+        };
+        var style = new StyleBoxFlat
+        {
+            BgColor = color,
+            CornerRadiusTopLeft = 16,
+            CornerRadiusTopRight = 16,
+            CornerRadiusBottomLeft = 16,
+            CornerRadiusBottomRight = 16,
+            BorderColor = new Color(0.8f, 0.82f, 0.85f),
+            BorderWidthTop = 1,
+            BorderWidthRight = 1,
+            BorderWidthBottom = 1,
+            BorderWidthLeft = 1,
+        };
+        button.AddThemeStyleboxOverride("normal", style);
+        button.AddThemeStyleboxOverride("hover", style);
+        button.AddThemeStyleboxOverride("pressed", style);
+        button.Pressed += () =>
+        {
+            _brushColor = color;
+            if (_activeTool is Tool.Eraser or Tool.Eyedropper)
+                SelectTool(Tool.Brush);
+            else
+                UpdateToolLabels();
+        };
+        return button;
+    }
+
+    private void UpdateToolLabels()
+    {
+        if (_thicknessLabel != null)
+            _thicknessLabel.Text = $"{_brushSize}px";
+        if (_opacityLabel != null)
+            _opacityLabel.Text = $"{Mathf.RoundToInt(_brushOpacity * 100f)}%";
+        if (_currentColorSwatch != null)
+            _currentColorSwatch.Color = _brushColor;
+        foreach (var (type, button) in _brushTypeButtons)
+            button.AddThemeStyleboxOverride("normal", SolidStyleBox(type == _brushType ? TileBgActive : TileBg));
+        foreach (var (type, button) in _shape2DButtons)
+            button.AddThemeStyleboxOverride("normal", SolidStyleBox(type == _shape2DType ? TileBgActive : TileBg));
+        foreach (var (type, button) in _shape3DButtons)
+            button.AddThemeStyleboxOverride("normal", SolidStyleBox(type == _shape3DType ? TileBgActive : TileBg));
+
+        if (_toolLabel != null)
+        {
+            _toolLabel.Text = _activeTool switch
+            {
+                Tool.Eyedropper => "Tool: Eyedropper",
+                Tool.Fill => "Tool: Fill",
+                Tool.Doodle => "Tool: Doodle",
+                Tool.Text => "Tool: Text",
+                Tool.Shape2D => $"Tool: {_shape2DType}",
+                Tool.Shape3D => $"Tool: {_shape3DType}",
+                Tool.Eraser => "Tool: Eraser",
+                _ => $"Tool: {_brushType} #{_brushColor.ToHtml(false)}",
+            };
+        }
+    }
+}
