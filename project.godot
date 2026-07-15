@@ -14,6 +14,10 @@ config/description="A free and open-source creative application for drawing, pai
 run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.6", "C#")
 config/icon="res://assets/Logo.png"
+boot_splash/bg_color=Color(0.114, 0.118, 0.129, 1)
+boot_splash/image="res://assets/splash/BootSplash.png"
+boot_splash/fullsize=true
+boot_splash/use_filter=true
 
 [autoload]
 
